@@ -6,12 +6,28 @@ android {
     namespace 'com.giryong.morningword'
     compileSdk 34
 
+    // 업데이트할 때 같은 앱으로 인식되도록 서명 도장을 고정한다.
+    signingConfigs {
+        fixed {
+            storeFile file('morningword.keystore')
+            storePassword 'morning2026'
+            keyAlias 'morningword'
+            keyPassword 'morning2026'
+        }
+    }
+
     defaultConfig {
         applicationId 'com.giryong.morningword'
         minSdk 26
         targetSdk 34
-        versionCode 1
-        versionName '1.0'
+        versionCode 3
+        versionName '1.2'
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.fixed
+        }
     }
 
     compileOptions {
