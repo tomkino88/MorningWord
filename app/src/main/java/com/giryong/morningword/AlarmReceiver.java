@@ -8,6 +8,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 
+import java.time.LocalDate;
 import java.util.Random;
 
 /** 알람 시간이 되면 문구를 골라 알림으로 띄우고, 다음 날 알람을 다시 예약한다. */
@@ -20,8 +21,47 @@ public class AlarmReceiver extends BroadcastReceiver {
     public void onReceive(Context c, Intent intent) {
         int idx = Phrases.randomIndex(Phrases.ALL, -1, new Random());
         showNotification(c, idx);
+        showFortuneNotification(c);
         if (!intent.getBooleanExtra(EXTRA_TEST, false)) {
             AlarmScheduler.schedule(c);
+        }
+    }
+
+    /** 생년월일이 저장돼 있고 '운세도 같이 받기'가 켜져 있으면 오늘의 운세 알림을 띄운다. */
+    static void showFortuneNotification(Context c) {
+        android.content.SharedPreferences prefs = AlarmScheduler.prefs(c);
+        if (!prefs.getBoolean(ProfileStore.K_NOTI, true)) return;
+        Saju.Person p = ProfileStore.load(prefs);
+        if (p == null) return;
+        Fortune f = Fortune.of(p, LocalDate.now());
+
+        Intent open = new Intent(c, MainActivity.class)
+                .putExtra(MainActivity.EXTRA_FORTUNE, true)
+                .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent pi = PendingIntent.getActivity(c, 3, open,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        String big = f.keyword + "\n" + f.summary
+                + "\n💼 " + f.work + "\n💰 " + f.money + "\n🤝 " + f.people
+                + "\n🍀 행운의 색 " + f.luckyColor;
+        Notification n = new Notification.Builder(c, CHANNEL)
+                .setSmallIcon(R.drawable.ic_notify)
+                .setContentTitle("오늘의 운세 " + f.starText())
+                .setContentText(f.shortText())
+                .setStyle(new Notification.BigTextStyle().bigText(big))
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+                .setCategory(Notification.CATEGORY_REMINDER)
+                .build();
+
+        NotificationManager nm = c.getSystemService(NotificationManager.class);
+        if (nm != null) {
+            try {
+                nm.notify(1002, n);
+            } catch (SecurityException ignored) {
+                // 알림 권한이 없으면 표시되지 않는다.
+            }
         }
     }
 
