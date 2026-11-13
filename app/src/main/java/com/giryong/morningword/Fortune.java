@@ -15,6 +15,7 @@ public final class Fortune {
     public final int stars;       // 1~5
     public final String keyword, summary, work, money, people, extra, advice;
     public final String luckyColor, luckyNumber, luckyDirection;
+    public final int luckyElem;   // 행운의 오행 번호(0~4)
 
     private Fortune(LocalDate date, int dayPillar, int god, int stars, String keyword, String summary,
                     String work, String money, String people, String extra, String advice,
@@ -33,6 +34,12 @@ public final class Fortune {
         this.luckyColor = luckyColor;
         this.luckyNumber = luckyNumber;
         this.luckyDirection = luckyDirection;
+        this.luckyElem = java.util.Arrays.asList(COLOR).indexOf(luckyColor);
+    }
+
+    /** 별 개수를 짧은 말로 */
+    public String scoreWord() {
+        return new String[]{"", "조심", "무난", "보통", "좋음", "아주 좋음"}[stars];
     }
 
     public String starText() {

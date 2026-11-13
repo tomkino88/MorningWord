@@ -43,11 +43,11 @@ public class AlarmReceiver extends BroadcastReceiver {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
         String big = f.keyword + "\n" + f.summary
-                + "\n💼 " + f.work + "\n💰 " + f.money + "\n🤝 " + f.people
-                + "\n🍀 행운의 색 " + f.luckyColor;
+                + "\n\n일 · " + f.work + "\n돈 · " + f.money + "\n사람 · " + f.people
+                + "\n\n행운의 색 " + f.luckyColor + " · 숫자 " + f.luckyNumber;
         Notification n = new Notification.Builder(c, CHANNEL)
                 .setSmallIcon(R.drawable.ic_notify)
-                .setContentTitle("오늘의 운세 " + f.starText())
+                .setContentTitle("오늘의 운세 · " + f.scoreWord() + " " + f.starText())
                 .setContentText(f.shortText())
                 .setStyle(new Notification.BigTextStyle().bigText(big))
                 .setContentIntent(pi)

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:colorAccent">#FF8FD3A8</item>
+        <item name="android:colorPrimary">#FF18211C</item>
+        <item name="android:windowBackground">#FF0F1512</item>
+        <item name="android:statusBarColor">#FF0F1512</item>
+    </style>
+</resources>

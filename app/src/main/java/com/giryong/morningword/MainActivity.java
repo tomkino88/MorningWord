@@ -3,29 +3,37 @@ package com.giryong.morningword;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlarmManager;
-import android.app.AlertDialog;
+import android.app.Dialog;
 import android.app.TimePickerDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.content.res.Configuration;
+import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
+import android.text.TextUtils;
+import android.text.style.ForegroundColorSpan;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
-import android.widget.Button;
-import android.widget.CheckBox;
+import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowManager;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.NumberPicker;
-import android.widget.RadioButton;
-import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -34,6 +42,7 @@ import android.widget.Toast;
 import java.text.SimpleDateFormat;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -41,31 +50,36 @@ import java.util.Random;
 
 public class MainActivity extends Activity {
 
-    private TextView phraseView, tagView, timeView, statusView;
-    private final List<Button> catButtons = new ArrayList<>();
+    public static final String EXTRA_FORTUNE = "open_fortune";
+
+    private SharedPreferences prefs;
+    private final Random rnd = new Random();
     private String cat = Phrases.ALL;
     private int current = -1;
-    private final Random rnd = new Random();
-    private SharedPreferences prefs;
-
-    // 운세
-    public static final String EXTRA_FORTUNE = "open_fortune";
-    private ScrollView scrollView;
-    private TextView fortuneHeader;
-    private LinearLayout fortuneBox;
     private boolean weekly = false;
 
-    private int ink, muted, sun, sunInk, bgTop, bgBottom, card, line;
+    private ScrollView scrollView;
+    private TextView phraseView, sourceView, tagView, timeView, ampmView, statusView, fortuneHeader;
+    private LinearLayout fortuneBox;
+    private final List<TextView> catSegs = new ArrayList<>();
+
+    // 색
+    private int bg, surface, ink, ink2, ink3, line, accent, accentSoft, rippleColor;
+    private int primary, onPrimary, segBg, trackOff;
+    private boolean night;
+    // 글씨체
+    private Typeface fLight, fReg, fSemi, fBold, fSerif, fSerifBold;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         prefs = AlarmScheduler.prefs(this);
         setColors();
+        loadFonts();
         setContentView(buildUi());
-        getWindow().setStatusBarColor(bgTop);
+        setupBars();
 
-        if (!handleIntent(getIntent())) showPhrase(Phrases.todayIndex());
+        if (!handleIntent(getIntent())) showPhrase(Phrases.todayIndex(), false);
         maybeScrollToFortune(getIntent());
         updateTime();
         askNotificationPermission();
@@ -92,20 +106,56 @@ public class MainActivity extends Activity {
         if (i == null || !i.hasExtra(AlarmReceiver.EXTRA_INDEX)) return false;
         int idx = i.getIntExtra(AlarmReceiver.EXTRA_INDEX, 0);
         if (idx < 0 || idx >= Phrases.LIST.length) return false;
-        showPhrase(idx);
+        showPhrase(idx, false);
         return true;
     }
 
-    // ---------- 색 ----------
+    // =====================================================================
+    // 디자인 바탕: 색 · 글씨체 · 작은 도구들
+    // =====================================================================
+
     private void setColors() {
-        boolean night = (getResources().getConfiguration().uiMode
+        night = (getResources().getConfiguration().uiMode
                 & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        // 파스텔 녹색 톤
         if (night) {
-            ink = 0xFFEEF0FA; muted = 0xFFA3A9C6; sun = 0xFFF2A04A; sunInk = 0xFF1B1408;
-            bgTop = 0xFF141A33; bgBottom = 0xFF3A2A2E; card = 0xFF1B2242; line = 0xFF2E3657;
+            bg = 0xFF0F1512; surface = 0xFF18211C; ink = 0xFFEDF4EF; ink2 = 0xFFA8BAAE;
+            ink3 = 0xFF6D7F73; line = 0xFF25312A; accent = 0xFF8FD3A8; accentSoft = 0xFF1E3027;
+            primary = 0xFF8FD3A8; onPrimary = 0xFF0F2619; segBg = 0xFF202B25; trackOff = 0xFF34423A;
+            rippleColor = 0x22FFFFFF;
         } else {
-            ink = 0xFF1D2340; muted = 0xFF5D6482; sun = 0xFFE8892B; sunInk = 0xFFFFFFFF;
-            bgTop = 0xFFEEF1F8; bgBottom = 0xFFFBE9D7; card = 0xFFFFFFFF; line = 0xFFD6DBEA;
+            bg = 0xFFF1F6F2; surface = 0xFFFFFFFF; ink = 0xFF1D2B23; ink2 = 0xFF55665B;
+            ink3 = 0xFF92A398; line = 0xFFE1EBE4; accent = 0xFF4F9D72; accentSoft = 0xFFE2F2E7;
+            primary = 0xFF3F7F5E; onPrimary = 0xFFFFFFFF; segBg = 0xFFE3ECE5; trackOff = 0xFFCFDCD3;
+            rippleColor = 0x14000000;
+        }
+    }
+
+    private void loadFonts() {
+        fLight = font(R.font.pretendard_light, Typeface.DEFAULT);
+        fReg = font(R.font.pretendard_regular, Typeface.DEFAULT);
+        fSemi = font(R.font.pretendard_semibold, Typeface.DEFAULT_BOLD);
+        fBold = font(R.font.pretendard_bold, Typeface.DEFAULT_BOLD);
+        fSerif = font(R.font.gowun_batang_regular, Typeface.SERIF);
+        fSerifBold = font(R.font.gowun_batang_bold, Typeface.create(Typeface.SERIF, Typeface.BOLD));
+    }
+
+    private Typeface font(int id, Typeface fallback) {
+        try {
+            return getResources().getFont(id);
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
+
+    private void setupBars() {
+        Window w = getWindow();
+        w.setStatusBarColor(bg);
+        w.setNavigationBarColor(bg);
+        if (!night) {
+            int flags = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            if (Build.VERSION.SDK_INT >= 27) flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            w.getDecorView().setSystemUiVisibility(flags);
         }
     }
 
@@ -114,233 +164,364 @@ public class MainActivity extends Activity {
                 getResources().getDisplayMetrics()));
     }
 
-    private GradientDrawable round(int fill, int stroke, float radiusDp) {
+    private GradientDrawable round(int fill, float radiusDp) {
         GradientDrawable g = new GradientDrawable();
         g.setColor(fill);
         g.setCornerRadius(dp(radiusDp));
-        if (stroke != 0) g.setStroke(dp(1), stroke);
         return g;
     }
 
-    private TextView text(String s, float sp, int color, boolean bold) {
+    private GradientDrawable outline(int strokeColor, float radiusDp) {
+        GradientDrawable g = round(0x00000000, radiusDp);
+        g.setStroke(dp(1), strokeColor);
+        return g;
+    }
+
+    /** 누르면 물결이 퍼지는 배경 */
+    private RippleDrawable ripple(android.graphics.drawable.Drawable content, float radiusDp) {
+        return new RippleDrawable(ColorStateList.valueOf(rippleColor), content, round(0xFFFFFFFF, radiusDp));
+    }
+
+    private TextView tv(CharSequence s, float sp, int color, Typeface f) {
         TextView t = new TextView(this);
         t.setText(s);
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
         t.setTextColor(color);
-        if (bold) t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setTypeface(f);
+        t.setIncludeFontPadding(false);
         return t;
     }
 
-    private Button pill(String label, boolean primary) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setAllCaps(false);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        b.setStateListAnimator(null);
-        b.setPadding(dp(18), dp(10), dp(18), dp(10));
-        b.setMinHeight(dp(44));
-        b.setMinimumHeight(dp(44));
-        stylePill(b, primary);
-        return b;
+    private LinearLayout col() {
+        LinearLayout l = new LinearLayout(this);
+        l.setOrientation(LinearLayout.VERTICAL);
+        return l;
     }
 
-    private void stylePill(Button b, boolean primary) {
-        if (primary) {
-            b.setBackground(round(sun, 0, 999));
-            b.setTextColor(sunInk);
-        } else {
-            b.setBackground(round(0x00000000, line, 999));
-            b.setTextColor(ink);
-        }
+    private LinearLayout row() {
+        LinearLayout l = new LinearLayout(this);
+        l.setOrientation(LinearLayout.HORIZONTAL);
+        l.setGravity(Gravity.CENTER_VERTICAL);
+        return l;
     }
 
     private LinearLayout.LayoutParams wrap(int topDp) {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.topMargin = dp(topDp);
         return lp;
     }
 
     private LinearLayout.LayoutParams full(int topDp) {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.topMargin = dp(topDp);
         return lp;
     }
 
-    // ---------- 화면 ----------
+    private LinearLayout.LayoutParams weight(float w) {
+        return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, w);
+    }
+
+    /** 흰 카드 */
+    private LinearLayout card() {
+        LinearLayout c = col();
+        c.setBackground(round(surface, 24));
+        c.setPadding(dp(24), dp(24), dp(24), dp(24));
+        return c;
+    }
+
+    /** 꽉 찬 버튼(primary) / 테두리 버튼 */
+    private TextView button(String label, boolean primary) {
+        TextView b = tv(label, 15, primary ? onPrimary : ink, fSemi);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(dp(20), dp(13), dp(20), dp(13));
+        b.setBackground(ripple(primary ? round(this.primary, 999) : outline(line, 999), 999));
+        b.setClickable(true);
+        b.setFocusable(true);
+        return b;
+    }
+
+    /** 글자만 있는 작은 버튼 */
+    private TextView textButton(String label, int color) {
+        TextView b = tv(label, 14, color, fSemi);
+        b.setPadding(dp(12), dp(10), dp(12), dp(10));
+        b.setBackground(ripple(round(0x00000000, 12), 12));
+        b.setClickable(true);
+        return b;
+    }
+
+    private View divider(int topDp) {
+        View v = new View(this);
+        v.setBackgroundColor(line);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(1)));
+        lp.topMargin = dp(topDp);
+        v.setLayoutParams(lp);
+        return v;
+    }
+
+    private void tintSwitch(Switch s) {
+        int[][] states = {{android.R.attr.state_checked}, {}};
+        s.setThumbTintList(new ColorStateList(states, new int[]{0xFFFFFFFF, night ? 0xFFB9C6BE : 0xFFFFFFFF}));
+        s.setTrackTintList(new ColorStateList(states, new int[]{accent, trackOff}));
+    }
+
+    /** 왼쪽 글 + 오른쪽 스위치 한 줄 */
+    private LinearLayout switchRow(String label, String sub, boolean checked,
+                                   android.widget.CompoundButton.OnCheckedChangeListener l) {
+        LinearLayout r = row();
+        LinearLayout texts = col();
+        texts.addView(tv(label, 15, ink, fSemi));
+        if (sub != null) texts.addView(tv(sub, 13, ink3, fReg), wrap(4));
+        r.addView(texts, weight(1));
+        Switch s = new Switch(this);
+        s.setChecked(checked);
+        tintSwitch(s);
+        s.setOnCheckedChangeListener(l);
+        r.addView(s);
+        r.setOnClickListener(v -> s.toggle());
+        r.setPadding(0, dp(6), 0, dp(6));
+        return r;
+    }
+
+    /** 둥근 바 안에서 하나를 고르는 버튼 묶음 */
+    private LinearLayout segmented(String[] labels, int selected, List<TextView> out,
+                                   java.util.function.IntConsumer onPick) {
+        LinearLayout box = row();
+        box.setBackground(round(segBg, 999));
+        box.setPadding(dp(4), dp(4), dp(4), dp(4));
+        List<TextView> segs = out != null ? out : new ArrayList<>();
+        segs.clear();
+        for (int i = 0; i < labels.length; i++) {
+            final int idx = i;
+            TextView s = tv(labels[i], labels.length > 4 ? 13 : 14, ink2, fSemi);
+            s.setGravity(Gravity.CENTER);
+            s.setPadding(dp(8), dp(9), dp(8), dp(9));
+            s.setOnClickListener(v -> {
+                styleSegments(segs, idx);
+                onPick.accept(idx);
+            });
+            segs.add(s);
+            box.addView(s, weight(1));
+        }
+        styleSegments(segs, selected);
+        return box;
+    }
+
+    private void styleSegments(List<TextView> segs, int selected) {
+        for (int i = 0; i < segs.size(); i++) {
+            TextView s = segs.get(i);
+            boolean on = i == selected;
+            s.setBackground(on ? round(surface, 999) : null);
+            s.setTextColor(on ? ink : ink3);
+            if (on) s.setElevation(dp(1)); else s.setElevation(0);
+        }
+    }
+
+    private CharSequence stars(int n, float sizeSp) {
+        SpannableStringBuilder sb = new SpannableStringBuilder();
+        for (int i = 1; i <= 5; i++) {
+            int start = sb.length();
+            sb.append("★");
+            sb.setSpan(new ForegroundColorSpan(i <= n ? accent : line), start, sb.length(),
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            if (i < 5) sb.append(" ");
+        }
+        return sb;
+    }
+
+    // =====================================================================
+    // 화면 만들기
+    // =====================================================================
+
     private View buildUi() {
         ScrollView scroll = new ScrollView(this);
         scrollView = scroll;
         scroll.setFillViewport(true);
-        GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{bgTop, bgTop, bgBottom});
-        scroll.setBackground(bg);
+        scroll.setBackgroundColor(bg);
+        scroll.setVerticalScrollBarEnabled(false);
 
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(20), dp(28), dp(20), dp(40));
+        LinearLayout root = col();
+        root.setPadding(dp(20), dp(28), dp(20), dp(48));
         scroll.addView(root);
 
-        // 제목 + 날짜
-        TextView title = text("출근길 한마디", 26, ink, true);
-        title.setTypeface(Typeface.create(Typeface.SERIF, Typeface.BOLD));
-        root.addView(title);
+        // ---- 머리글 ----
+        LinearLayout brand = row();
+        View dot = new View(this);
+        dot.setBackground(round(accent, 999));
+        brand.addView(dot, new LinearLayout.LayoutParams(dp(8), dp(8)));
+        TextView brandName = tv("출근길 한마디", 13, ink2, fSemi);
+        LinearLayout.LayoutParams bl = wrap(0);
+        bl.leftMargin = dp(8);
+        brand.addView(brandName, bl);
+        root.addView(brand);
+
         String today = new SimpleDateFormat("M월 d일 EEEE", Locale.KOREAN).format(new Date());
-        root.addView(text(today, 14, muted, false), wrap(4));
+        root.addView(tv(today, 14, ink3, fReg), wrap(26));
+        TextView hello = tv(greeting(), 30, ink, fBold);
+        hello.setLetterSpacing(-0.02f);
+        root.addView(hello, wrap(8));
 
-        // 종류 고르기
-        LinearLayout chips = new LinearLayout(this);
-        chips.setOrientation(LinearLayout.HORIZONTAL);
-        for (String c : Phrases.CATS) {
-            Button b = pill(c, false);
-            b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-            b.setPadding(dp(14), dp(6), dp(14), dp(6));
-            b.setOnClickListener(v -> {
-                cat = c;
-                refreshChips();
-                showPhrase(Phrases.randomIndex(cat, current, rnd));
-            });
-            LinearLayout.LayoutParams lp = wrap(0);
-            lp.rightMargin = dp(8);
-            chips.addView(b, lp);
-            catButtons.add(b);
-        }
-        root.addView(chips, full(22));
-        refreshChips();
+        // ---- 문구 종류 고르기 ----
+        int sel = 0;
+        for (int i = 0; i < Phrases.CATS.length; i++) if (Phrases.CATS[i].equals(cat)) sel = i;
+        root.addView(segmented(Phrases.CATS, sel, catSegs, idx -> {
+            cat = Phrases.CATS[idx];
+            showPhrase(Phrases.randomIndex(cat, current, rnd), true);
+        }), full(26));
 
-        // 문구 카드
-        LinearLayout cardBox = new LinearLayout(this);
-        cardBox.setOrientation(LinearLayout.VERTICAL);
-        cardBox.setPadding(dp(24), dp(28), dp(24), dp(22));
-        cardBox.setBackground(round(card, line, 18));
-        cardBox.setMinimumHeight(dp(240));
+        // ---- 문구 카드 ----
+        LinearLayout pc = card();
+        pc.setPadding(dp(26), dp(26), dp(26), dp(22));
 
-        tagView = text("오늘의 문구", 13, sun, true);
-        tagView.setLetterSpacing(0.08f);
-        cardBox.addView(tagView);
+        tagView = tv("오늘의 문구", 12, accent, fSemi);
+        tagView.setBackground(round(accentSoft, 999));
+        tagView.setPadding(dp(10), dp(6), dp(10), dp(6));
+        pc.addView(tagView, wrap(0));
 
-        phraseView = text("", 23, ink, false);
-        phraseView.setTypeface(Typeface.SERIF);
-        phraseView.setLineSpacing(0, 1.45f);
-        phraseView.setOnClickListener(v -> showPhrase(Phrases.randomIndex(cat, current, rnd)));
-        cardBox.addView(phraseView, full(12));
+        TextView quote = tv("“", 54, accent, fSerifBold);
+        quote.setAlpha(0.35f);
+        pc.addView(quote, wrap(14));
 
-        LinearLayout actions = new LinearLayout(this);
-        actions.setOrientation(LinearLayout.HORIZONTAL);
-        actions.setGravity(Gravity.CENTER_VERTICAL);
-        Button next = pill("다른 문구", true);
-        next.setOnClickListener(v -> showPhrase(Phrases.randomIndex(cat, current, rnd)));
-        Button share = pill("보내기", false);
+        phraseView = tv("", 22, ink, fSerif);
+        phraseView.setLineSpacing(dp(4), 1.25f);
+        phraseView.setMinHeight(dp(110));
+        phraseView.setOnClickListener(v -> showPhrase(Phrases.randomIndex(cat, current, rnd), true));
+        LinearLayout.LayoutParams pl = full(-10);
+        pc.addView(phraseView, pl);
+        sourceView = tv("", 13, ink3, fReg);
+        sourceView.setLineSpacing(dp(2), 1.2f);
+        pc.addView(sourceView, full(14));
+
+        pc.addView(divider(24));
+        LinearLayout actions = row();
+        TextView next = button("다른 문구", true);
+        next.setOnClickListener(v -> showPhrase(Phrases.randomIndex(cat, current, rnd), true));
+        actions.addView(next, wrap(0));
+        View gap = new View(this);
+        actions.addView(gap, weight(1));
+        TextView share = textButton("보내기", ink2);
         share.setOnClickListener(v -> sharePhrase());
-        Button copy = pill("복사", false);
+        TextView copy = textButton("복사", ink2);
         copy.setOnClickListener(v -> copyPhrase());
-        LinearLayout.LayoutParams a1 = wrap(0); a1.rightMargin = dp(8);
-        LinearLayout.LayoutParams a2 = wrap(0); a2.rightMargin = dp(8);
-        actions.addView(next, a1);
-        actions.addView(share, a2);
-        actions.addView(copy, wrap(0));
-        cardBox.addView(actions, full(26));
-        root.addView(cardBox, full(14));
+        actions.addView(share);
+        actions.addView(copy);
+        pc.addView(actions, full(16));
+        root.addView(pc, full(14));
 
-        // 운세
-        fortuneHeader = text("오늘의 운세", 16, ink, true);
-        root.addView(fortuneHeader, full(28));
-        fortuneBox = new LinearLayout(this);
-        fortuneBox.setOrientation(LinearLayout.VERTICAL);
-        fortuneBox.setPadding(dp(22), dp(22), dp(22), dp(20));
-        fortuneBox.setBackground(round(card, line, 18));
-        root.addView(fortuneBox, full(10));
+        // ---- 운세 ----
+        LinearLayout fh = row();
+        fortuneHeader = tv("오늘의 운세", 20, ink, fBold);
+        fh.addView(fortuneHeader, weight(1));
+        fh.addView(tv("사주 일진 기준", 12, ink3, fReg));
+        root.addView(fh, full(40));
+
+        fortuneBox = card();
+        root.addView(fortuneBox, full(14));
         renderFortune();
 
-        // 알람 설정
-        View divider = new View(this);
-        divider.setBackgroundColor(line);
-        LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(1));
-        dl.topMargin = dp(28);
-        root.addView(divider, dl);
+        TextView note = tv("그날의 일진과 내 일주를 사주 규칙(십신·합·충)으로 비교해 고른 재미용 운세예요. "
+                + "미래를 맞히는 것은 아니에요.", 12, ink3, fReg);
+        note.setLineSpacing(dp(2), 1.2f);
+        note.setPadding(dp(6), 0, dp(6), 0);
+        root.addView(note, full(12));
 
-        root.addView(text("아침 알람", 16, ink, true), full(20));
+        // ---- 알람 ----
+        root.addView(tv("아침 알림", 20, ink, fBold), full(40));
+        LinearLayout ac = card();
 
-        timeView = text("", 40, ink, true);
-        timeView.setPadding(0, dp(4), 0, dp(4));
-        timeView.setOnClickListener(v -> pickTime());
-        root.addView(timeView, wrap(6));
-        root.addView(text("시간을 누르면 바꿀 수 있어요", 13, muted, false));
+        LinearLayout timeRow = row();
+        timeRow.setGravity(Gravity.BOTTOM);
+        ampmView = tv("", 18, ink2, fSemi);
+        timeView = tv("", 52, ink, fLight);
+        timeView.setLetterSpacing(-0.02f);
+        timeRow.addView(timeView);
+        LinearLayout.LayoutParams al = wrap(0);
+        al.leftMargin = dp(8);
+        al.bottomMargin = dp(8);
+        timeRow.addView(ampmView, al);
+        timeRow.setOnClickListener(v -> pickTime());
+        timeRow.setBackground(ripple(round(0x00000000, 16), 16));
+        ac.addView(timeRow, wrap(0));
+        ac.addView(tv("시간을 누르면 바꿀 수 있어요", 13, ink3, fReg), wrap(6));
 
-        Switch onOff = new Switch(this);
-        onOff.setText("알람 켜기");
-        onOff.setTextColor(ink);
-        onOff.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        onOff.setChecked(prefs.getBoolean(AlarmScheduler.K_ON, false));
-        onOff.setOnCheckedChangeListener((b, checked) -> {
+        ac.addView(divider(20));
+        ac.addView(switchRow("알림 켜기", null, prefs.getBoolean(AlarmScheduler.K_ON, false), (b, checked) -> {
             prefs.edit().putBoolean(AlarmScheduler.K_ON, checked).apply();
             if (checked) checkExactAlarmPermission();
             AlarmScheduler.schedule(this);
             updateStatus();
-            if (checked) Toast.makeText(this, "알람을 켰어요", Toast.LENGTH_SHORT).show();
-        });
-        root.addView(onOff, full(16));
+            if (checked) Toast.makeText(this, "알림을 켰어요", Toast.LENGTH_SHORT).show();
+        }), full(10));
+        ac.addView(switchRow("평일만 받기", "월요일 ~ 금요일", prefs.getBoolean(AlarmScheduler.K_WEEKDAY, true),
+                (b, checked) -> {
+                    prefs.edit().putBoolean(AlarmScheduler.K_WEEKDAY, checked).apply();
+                    AlarmScheduler.schedule(this);
+                    updateStatus();
+                }), full(6));
 
-        CheckBox weekdays = new CheckBox(this);
-        weekdays.setText("평일만 받기 (월~금)");
-        weekdays.setTextColor(ink);
-        weekdays.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        weekdays.setChecked(prefs.getBoolean(AlarmScheduler.K_WEEKDAY, true));
-        weekdays.setOnCheckedChangeListener((b, checked) -> {
-            prefs.edit().putBoolean(AlarmScheduler.K_WEEKDAY, checked).apply();
-            AlarmScheduler.schedule(this);
-            updateStatus();
-        });
-        root.addView(weekdays, full(8));
+        statusView = tv("", 13, ink2, fReg);
+        statusView.setLineSpacing(dp(2), 1.2f);
+        statusView.setBackground(round(bg, 14));
+        statusView.setPadding(dp(14), dp(12), dp(14), dp(12));
+        ac.addView(statusView, full(16));
 
-        statusView = text("", 14, muted, false);
-        root.addView(statusView, full(10));
-
-        Button test = pill("지금 알림 한 번 받아보기", false);
+        TextView test = button("알림 미리 받아보기", false);
         test.setOnClickListener(v -> {
             if (!hasNotificationPermission()) {
                 Toast.makeText(this, "알림 권한을 허용해야 받을 수 있어요", Toast.LENGTH_LONG).show();
                 askNotificationPermission();
                 return;
             }
-            Intent i = new Intent(this, AlarmReceiver.class).putExtra(AlarmReceiver.EXTRA_TEST, true);
-            sendBroadcast(i);
+            sendBroadcast(new Intent(this, AlarmReceiver.class).putExtra(AlarmReceiver.EXTRA_TEST, true));
         });
-        root.addView(test, wrap(18));
+        ac.addView(test, full(16));
+        root.addView(ac, full(14));
+
+        TextView foot = tv("출근길 한마디 · 오늘도 무사히", 12, ink3, fReg);
+        foot.setGravity(Gravity.CENTER);
+        root.addView(foot, full(32));
 
         return scroll;
     }
 
-    private void refreshChips() {
-        for (Button b : catButtons) {
-            boolean on = b.getText().toString().equals(cat);
-            if (on) {
-                b.setBackground(round(ink, 0, 999));
-                b.setTextColor(bgTop);
-            } else {
-                stylePill(b, false);
-            }
-        }
+    private String greeting() {
+        int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+        if (h < 5) return "늦은 밤이에요,\n푹 쉬어요";
+        if (h < 11) return "좋은 아침이에요";
+        if (h < 17) return "오늘도 잘하고 있어요";
+        return "오늘도 수고했어요";
     }
 
-    private void showPhrase(int idx) {
+    private void showPhrase(int idx, boolean animate) {
         current = idx;
         String[] p = Phrases.LIST[idx];
-        phraseView.animate().alpha(0f).setDuration(150).withEndAction(() -> {
-            phraseView.setText(p[1]);
-            tagView.setText(p[0] + " 한마디");
-            phraseView.animate().alpha(1f).setDuration(220).start();
+        int cut = p[1].lastIndexOf(" — ");
+        String main = cut > 0 ? p[1].substring(0, cut) : p[1];
+        String src = cut > 0 ? "— " + p[1].substring(cut + 3) : "";
+        Runnable set = () -> {
+            phraseView.setText(main);
+            sourceView.setText(src);
+            sourceView.setVisibility(src.isEmpty() ? View.GONE : View.VISIBLE);
+            tagView.setText(p[0]);
+        };
+        if (!animate) {
+            set.run();
+            return;
+        }
+        sourceView.animate().alpha(0f).setDuration(140).start();
+        phraseView.animate().alpha(0f).translationY(dp(4)).setDuration(140).withEndAction(() -> {
+            set.run();
+            phraseView.setTranslationY(-dp(4));
+            phraseView.animate().alpha(1f).translationY(0).setDuration(220).start();
+            sourceView.animate().alpha(1f).setDuration(220).start();
         }).start();
     }
 
     private void sharePhrase() {
         if (current < 0) return;
-        Intent send = new Intent(Intent.ACTION_SEND);
-        send.setType("text/plain");
-        send.putExtra(Intent.EXTRA_TEXT, Phrases.LIST[current][1]);
-        startActivity(Intent.createChooser(send, "문구 보내기"));
+        shareText(Phrases.LIST[current][1], "문구 보내기");
     }
 
     private void copyPhrase() {
@@ -352,18 +533,25 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ---------- 운세 ----------
-    private static final String[] WEEK = {"월", "화", "수", "목", "금", "토", "일"};
-
-    private String dayLabel(LocalDate d) {
-        return d.getMonthValue() + "/" + d.getDayOfMonth() + "(" + WEEK[d.getDayOfWeek().getValue() - 1] + ")";
+    private void shareText(String s, String title) {
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_TEXT, s);
+        startActivity(Intent.createChooser(send, title));
     }
+
+    // =====================================================================
+    // 운세
+    // =====================================================================
+
+    private static final String[] WEEK = {"월", "화", "수", "목", "금", "토", "일"};
+    private static final int[] LUCKY_SWATCH = {0xFF4FA77A, 0xFFE0574A, 0xFFE7B53A, 0xFFFFFFFF, 0xFF2D3B66};
 
     private void maybeScrollToFortune(Intent i) {
         if (i == null || !i.getBooleanExtra(EXTRA_FORTUNE, false) || scrollView == null) return;
         weekly = false;
         renderFortune();
-        scrollView.post(() -> scrollView.smoothScrollTo(0, Math.max(0, fortuneHeader.getTop() - dp(12))));
+        scrollView.post(() -> scrollView.smoothScrollTo(0, Math.max(0, fortuneHeader.getTop() - dp(16))));
     }
 
     private void renderFortune() {
@@ -372,206 +560,242 @@ public class MainActivity extends Activity {
         Saju.Person p = ProfileStore.load(prefs);
 
         if (p == null) {
-            TextView t = text("생년월일과 태어난 시간을 넣으면\n매일 아침 나만의 운세를 볼 수 있어요.", 16, ink, false);
-            t.setLineSpacing(0, 1.35f);
+            TextView t = tv("태어난 날을 알려주시면\n매일 아침 운세를 함께 보내드려요", 19, ink, fSerif);
+            t.setLineSpacing(dp(4), 1.2f);
             fortuneBox.addView(t);
-            Button set = pill("생년월일 넣기", true);
+            TextView sub = tv("생년월일과 태어난 시간(모르면 생략)만 있으면 돼요.", 13, ink3, fReg);
+            fortuneBox.addView(sub, wrap(12));
+            TextView set = button("생년월일 넣기", true);
             set.setOnClickListener(v -> showBirthDialog());
-            fortuneBox.addView(set, wrap(16));
-            addFortuneNote();
+            fortuneBox.addView(set, wrap(20));
             return;
         }
 
-        // 내 사주 정보
-        String mine = ProfileStore.describe(prefs) + "\n내 일주 " + Saju.name(p.dayPillar)
-                + "(" + Saju.hanja(p.dayPillar) + ")";
-        if (p.hourPillar >= 0) {
-            mine += " · 시주 " + Saju.name(p.hourPillar) + "(" + Saju.hanja(p.hourPillar) + ")";
-        }
-        TextView info = text(mine, 13, muted, false);
-        info.setLineSpacing(0, 1.3f);
-        fortuneBox.addView(info);
-
-        // 오늘 / 이번 주 고르기
-        LinearLayout tabs = new LinearLayout(this);
-        tabs.setOrientation(LinearLayout.HORIZONTAL);
-        Button tToday = pill("오늘", false);
-        Button tWeek = pill("7일 운세", false);
-        for (Button b : new Button[]{tToday, tWeek}) {
-            b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-            b.setPadding(dp(14), dp(6), dp(14), dp(6));
-        }
-        Button on = weekly ? tWeek : tToday;
-        on.setBackground(round(ink, 0, 999));
-        on.setTextColor(bgTop);
-        tToday.setOnClickListener(v -> { weekly = false; renderFortune(); });
-        tWeek.setOnClickListener(v -> { weekly = true; renderFortune(); });
-        LinearLayout.LayoutParams tl = wrap(0);
-        tl.rightMargin = dp(8);
-        tabs.addView(tToday, tl);
-        tabs.addView(tWeek, wrap(0));
-        fortuneBox.addView(tabs, full(14));
+        fortuneBox.addView(segmented(new String[]{"오늘", "7일 운세"}, weekly ? 1 : 0, null, idx -> {
+            weekly = idx == 1;
+            fortuneBox.post(this::renderFortune);
+        }), full(0));
 
         LocalDate today = LocalDate.now();
-        if (!weekly) {
-            Fortune f = Fortune.of(p, today);
-            TextView date = text(today.getMonthValue() + "월 " + today.getDayOfMonth() + "일 · "
-                    + Saju.name(f.dayPillar) + "(" + Saju.hanja(f.dayPillar) + ")일", 13, sun, true);
-            fortuneBox.addView(date, full(18));
-            fortuneBox.addView(text(f.starText(), 24, sun, false), full(4));
-            TextView kw = text(f.keyword, 21, ink, true);
-            kw.setTypeface(Typeface.create(Typeface.SERIF, Typeface.BOLD));
-            fortuneBox.addView(kw, full(4));
-            TextView sum = text(f.summary, 16, ink, false);
-            sum.setLineSpacing(0, 1.4f);
-            fortuneBox.addView(sum, full(10));
+        if (!weekly) renderToday(p, today); else renderWeek(p, today);
 
-            addLine("💼 일", f.work);
-            addLine("💰 돈", f.money);
-            addLine("🤝 사람", f.people);
-            if (!f.extra.isEmpty()) {
-                TextView ex = text(f.extra, 14, muted, false);
-                ex.setLineSpacing(0, 1.35f);
-                fortuneBox.addView(ex, full(12));
-            }
-            fortuneBox.addView(text("🍀 행운의 색 " + f.luckyColor + " · 숫자 " + f.luckyNumber
-                    + " · 방향 " + f.luckyDirection, 14, ink, false), full(12));
-            TextView adv = text("“" + f.advice + "”", 17, ink, false);
-            adv.setTypeface(Typeface.SERIF);
-            fortuneBox.addView(adv, full(14));
+        fortuneBox.addView(divider(22));
+        fortuneBox.addView(switchRow("아침 알림에 운세도 받기", null,
+                prefs.getBoolean(ProfileStore.K_NOTI, true),
+                (b, c) -> prefs.edit().putBoolean(ProfileStore.K_NOTI, c).apply()), full(10));
 
-            Button share = pill("운세 보내기", false);
-            share.setOnClickListener(v -> shareText(today.getMonthValue() + "월 " + today.getDayOfMonth()
-                    + "일 운세 " + f.starText() + "\n" + f.keyword + "\n" + f.summary
-                    + "\n💼 " + f.work + "\n💰 " + f.money + "\n🤝 " + f.people));
-            fortuneBox.addView(share, wrap(16));
-        } else {
-            for (int i = 0; i < 7; i++) {
-                LocalDate d = today.plusDays(i);
-                Fortune f = Fortune.of(p, d);
-                if (i > 0) {
-                    View div = new View(this);
-                    div.setBackgroundColor(line);
-                    LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT, dp(1));
-                    dl.topMargin = dp(12);
-                    fortuneBox.addView(div, dl);
-                }
-                LinearLayout row = new LinearLayout(this);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setGravity(Gravity.CENTER_VERTICAL);
-                TextView dt = text(dayLabel(d) + (i == 0 ? " 오늘" : ""), 14, i == 0 ? sun : ink, true);
-                row.addView(dt, new LinearLayout.LayoutParams(0,
-                        LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-                row.addView(text(f.starText(), 15, sun, false));
-                fortuneBox.addView(row, full(12));
-                fortuneBox.addView(text(f.keyword + " · " + Saju.name(f.dayPillar) + "일", 15, ink, true), full(2));
-                TextView s = text(f.summary, 14, muted, false);
-                s.setLineSpacing(0, 1.3f);
-                fortuneBox.addView(s, full(2));
-            }
+        LinearLayout mine = row();
+        String info = ProfileStore.describe(prefs) + "\n일주 " + Saju.name(p.dayPillar)
+                + "(" + Saju.hanja(p.dayPillar) + ")";
+        if (p.hourPillar >= 0) info += " · 시주 " + Saju.name(p.hourPillar) + "(" + Saju.hanja(p.hourPillar) + ")";
+        TextView it = tv(info, 12, ink3, fReg);
+        it.setLineSpacing(dp(2), 1.2f);
+        mine.addView(it, weight(1));
+        TextView edit = textButton("수정", accent);
+        edit.setOnClickListener(v -> showBirthDialog());
+        mine.addView(edit);
+        fortuneBox.addView(mine, full(10));
+    }
+
+    private void renderToday(Saju.Person p, LocalDate today) {
+        Fortune f = Fortune.of(p, today);
+
+        LinearLayout top = row();
+        top.setGravity(Gravity.TOP);
+        LinearLayout left = col();
+        left.addView(tv(today.getMonthValue() + "월 " + today.getDayOfMonth() + "일 · "
+                + Saju.name(f.dayPillar) + "(" + Saju.hanja(f.dayPillar) + ")일", 13, ink3, fReg));
+        TextView kw = tv(f.keyword, 24, ink, fSerifBold);
+        kw.setLineSpacing(dp(2), 1.1f);
+        left.addView(kw, wrap(10));
+        top.addView(left, weight(1));
+        TextView badge = tv(f.scoreWord(), 13, accent, fSemi);
+        badge.setBackground(round(accentSoft, 999));
+        badge.setPadding(dp(12), dp(7), dp(12), dp(7));
+        top.addView(badge);
+        fortuneBox.addView(top, full(24));
+
+        fortuneBox.addView(tv(stars(f.stars, 18), 18, accent, fReg), wrap(12));
+
+        TextView sum = tv(f.summary, 16, ink, fReg);
+        sum.setLineSpacing(dp(4), 1.2f);
+        fortuneBox.addView(sum, full(18));
+
+        fortuneBox.addView(divider(22));
+        addDetail("일", f.work, 18);
+        addDetail("돈", f.money, 14);
+        addDetail("사람", f.people, 14);
+
+        if (!f.extra.isEmpty()) {
+            TextView ex = tv(f.extra, 14, ink2, fReg);
+            ex.setLineSpacing(dp(3), 1.2f);
+            ex.setBackground(round(accentSoft, 16));
+            ex.setPadding(dp(16), dp(14), dp(16), dp(14));
+            fortuneBox.addView(ex, full(20));
         }
 
-        CheckBox noti = new CheckBox(this);
-        noti.setText("아침 알림에 운세도 같이 받기");
-        noti.setTextColor(ink);
-        noti.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        noti.setChecked(prefs.getBoolean(ProfileStore.K_NOTI, true));
-        noti.setOnCheckedChangeListener((b, c) -> prefs.edit().putBoolean(ProfileStore.K_NOTI, c).apply());
-        fortuneBox.addView(noti, full(16));
+        // 행운 타일 3개
+        LinearLayout tiles = row();
+        tiles.addView(luckyTile("행운의 색", f.luckyColor, f.luckyElem >= 0 ? LUCKY_SWATCH[f.luckyElem] : 0), weight(1));
+        LinearLayout.LayoutParams m = weight(1);
+        m.leftMargin = dp(8);
+        tiles.addView(luckyTile("숫자", f.luckyNumber, 0), m);
+        LinearLayout.LayoutParams m2 = weight(1);
+        m2.leftMargin = dp(8);
+        tiles.addView(luckyTile("방향", f.luckyDirection, 0), m2);
+        fortuneBox.addView(tiles, full(16));
 
-        Button edit = pill("생년월일 바꾸기", false);
-        edit.setOnClickListener(v -> showBirthDialog());
-        fortuneBox.addView(edit, wrap(8));
-        addFortuneNote();
+        TextView adv = tv("“" + f.advice + "”", 17, ink, fSerif);
+        adv.setGravity(Gravity.CENTER);
+        adv.setLineSpacing(dp(3), 1.2f);
+        fortuneBox.addView(adv, full(24));
+
+        TextView share = textButton("운세 보내기", ink2);
+        share.setOnClickListener(v -> shareText(today.getMonthValue() + "월 " + today.getDayOfMonth()
+                + "일 운세 · " + f.scoreWord() + " " + f.starText() + "\n\n" + f.keyword + "\n" + f.summary
+                + "\n\n일 · " + f.work + "\n돈 · " + f.money + "\n사람 · " + f.people, "운세 보내기"));
+        LinearLayout sr = row();
+        sr.setGravity(Gravity.CENTER);
+        sr.addView(share);
+        fortuneBox.addView(sr, full(10));
     }
 
-    private void addLine(String label, String body) {
-        TextView t = text(label + "   " + body, 15, ink, false);
-        t.setLineSpacing(0, 1.3f);
-        fortuneBox.addView(t, full(8));
+    private void addDetail(String label, String body, int topDp) {
+        LinearLayout r = row();
+        r.setGravity(Gravity.TOP);
+        TextView l = tv(label, 13, ink3, fSemi);
+        r.addView(l, new LinearLayout.LayoutParams(dp(44), ViewGroup.LayoutParams.WRAP_CONTENT));
+        TextView b = tv(body, 15, ink, fReg);
+        b.setLineSpacing(dp(3), 1.2f);
+        r.addView(b, weight(1));
+        fortuneBox.addView(r, full(topDp));
     }
 
-    private void addFortuneNote() {
-        TextView n = text("사주 계산 규칙(그날의 일진과 내 일주의 관계)으로 고른 재미용 운세예요. "
-                + "미래를 맞히는 것은 아니에요.", 12, muted, false);
-        n.setLineSpacing(0, 1.3f);
-        fortuneBox.addView(n, full(14));
+    private LinearLayout luckyTile(String label, String value, int swatch) {
+        LinearLayout t = col();
+        t.setBackground(round(bg, 16));
+        t.setPadding(dp(14), dp(14), dp(10), dp(14));
+        t.addView(tv(label, 12, ink3, fReg));
+        LinearLayout v = row();
+        if (swatch != 0) {
+            View s = new View(this);
+            GradientDrawable g = round(swatch, 999);
+            g.setStroke(dp(1), line);
+            s.setBackground(g);
+            LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(dp(12), dp(12));
+            sl.rightMargin = dp(6);
+            v.addView(s, sl);
+        }
+        TextView val = tv(value, 15, ink, fSemi);
+        val.setMaxLines(1);
+        val.setEllipsize(TextUtils.TruncateAt.END);
+        v.addView(val);
+        t.addView(v, wrap(8));
+        return t;
     }
 
-    private void shareText(String s) {
-        Intent send = new Intent(Intent.ACTION_SEND);
-        send.setType("text/plain");
-        send.putExtra(Intent.EXTRA_TEXT, s);
-        startActivity(Intent.createChooser(send, "운세 보내기"));
+    private void renderWeek(Saju.Person p, LocalDate today) {
+        for (int i = 0; i < 7; i++) {
+            LocalDate d = today.plusDays(i);
+            Fortune f = Fortune.of(p, d);
+
+            LinearLayout r = row();
+            r.setPadding(dp(12), dp(14), dp(12), dp(14));
+            if (i == 0) r.setBackground(round(accentSoft, 16));
+
+            LinearLayout day = col();
+            day.setGravity(Gravity.CENTER_HORIZONTAL);
+            TextView num = tv(String.valueOf(d.getDayOfMonth()), 20, i == 0 ? accent : ink, fBold);
+            num.setGravity(Gravity.CENTER);
+            day.addView(num);
+            TextView wd = tv(i == 0 ? "오늘" : WEEK[d.getDayOfWeek().getValue() - 1], 12,
+                    i == 0 ? accent : ink3, fSemi);
+            wd.setGravity(Gravity.CENTER);
+            day.addView(wd, wrap(4));
+            r.addView(day, new LinearLayout.LayoutParams(dp(40), ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            LinearLayout mid = col();
+            mid.setPadding(dp(12), 0, dp(8), 0);
+            mid.addView(tv(f.keyword, 15, ink, fSemi));
+            TextView s = tv(Saju.name(f.dayPillar) + "일 · " + firstSentence(f.summary), 13, ink2, fReg);
+            s.setMaxLines(2);
+            s.setEllipsize(TextUtils.TruncateAt.END);
+            s.setLineSpacing(dp(2), 1.1f);
+            mid.addView(s, wrap(6));
+            r.addView(mid, weight(1));
+
+            r.addView(tv(stars(f.stars, 11), 11, accent, fReg));
+            fortuneBox.addView(r, full(i == 0 ? 18 : 4));
+        }
     }
+
+    private String firstSentence(String s) {
+        int k = s.indexOf(". ");
+        return k > 0 ? s.substring(0, k + 1) : s;
+    }
+
+    // ---------- 생년월일 입력 창 ----------
 
     private NumberPicker picker(int min, int max, int value, String unit) {
         NumberPicker np = new NumberPicker(this);
         np.setMinValue(min);
         np.setMaxValue(max);
         String[] shown = new String[max - min + 1];
-        for (int i = min; i <= max; i++) shown[i - min] = i + unit;
+        for (int i = min; i <= max; i++) shown[i - min] = unit.equals("분") ? String.format(Locale.KOREAN, "%02d분", i) : i + unit;
         np.setDisplayedValues(shown);
         np.setValue(Math.max(min, Math.min(max, value)));
         np.setDescendantFocusability(NumberPicker.FOCUS_BLOCK_DESCENDANTS);
+        stylePicker(np);
         return np;
+    }
+
+    private void stylePicker(NumberPicker np) {
+        if (Build.VERSION.SDK_INT >= 29) {
+            np.setTextColor(ink);
+            np.setTextSize(dp(17));
+            np.setSelectionDividerHeight(dp(1));
+        }
     }
 
     private void showBirthDialog() {
         boolean had = ProfileStore.isSet(prefs);
         int curYear = LocalDate.now().getYear();
 
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(22), dp(8), dp(22), dp(4));
+        Dialog dlg = new Dialog(this);
+        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
 
-        // 양력/음력
-        RadioGroup cal = new RadioGroup(this);
-        cal.setOrientation(LinearLayout.HORIZONTAL);
-        RadioButton solar = new RadioButton(this);
-        solar.setText("양력");
-        solar.setId(View.generateViewId());
-        RadioButton lunar = new RadioButton(this);
-        lunar.setText("음력");
-        lunar.setId(View.generateViewId());
-        cal.addView(solar);
-        cal.addView(lunar);
-        box.addView(cal);
+        LinearLayout box = col();
+        box.setBackground(round(surface, 28));
+        box.setPadding(dp(24), dp(26), dp(24), dp(20));
 
-        CheckBox leap = new CheckBox(this);
-        leap.setText("윤달이에요");
-        box.addView(leap);
+        box.addView(tv("생년월일 넣기", 20, ink, fBold));
+        box.addView(tv("운세 계산에만 쓰고, 폰 밖으로 보내지 않아요.", 13, ink3, fReg), wrap(8));
 
-        boolean isLunar = had && prefs.getBoolean(ProfileStore.K_LUNAR, false);
-        cal.check(isLunar ? lunar.getId() : solar.getId());
-        leap.setChecked(had && prefs.getBoolean(ProfileStore.K_LEAP, false));
-        leap.setVisibility(isLunar ? View.VISIBLE : View.GONE);
-        cal.setOnCheckedChangeListener((g, id) ->
-                leap.setVisibility(id == lunar.getId() ? View.VISIBLE : View.GONE));
+        final boolean[] lunar = {had && prefs.getBoolean(ProfileStore.K_LUNAR, false)};
+        final boolean[] leap = {had && prefs.getBoolean(ProfileStore.K_LEAP, false)};
 
-        // 날짜
-        LinearLayout dateRow = new LinearLayout(this);
-        dateRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout leapRow = switchRow("윤달이에요", null, leap[0], (b, c) -> leap[0] = c);
+        leapRow.setVisibility(lunar[0] ? View.VISIBLE : View.GONE);
+
+        box.addView(segmented(new String[]{"양력", "음력"}, lunar[0] ? 1 : 0, null, idx -> {
+            lunar[0] = idx == 1;
+            leapRow.setVisibility(lunar[0] ? View.VISIBLE : View.GONE);
+        }), full(20));
+        box.addView(leapRow, full(6));
+
+        LinearLayout dateRow = row();
         dateRow.setGravity(Gravity.CENTER);
         NumberPicker py = picker(1920, curYear, had ? prefs.getInt(ProfileStore.K_Y, 1990) : 1990, "년");
         py.setWrapSelectorWheel(false);
         NumberPicker pm = picker(1, 12, had ? prefs.getInt(ProfileStore.K_M, 1) : 1, "월");
         NumberPicker pd = picker(1, 31, had ? prefs.getInt(ProfileStore.K_D, 1) : 1, "일");
-        LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        dateRow.addView(py, np);
-        dateRow.addView(pm, new LinearLayout.LayoutParams(np));
-        dateRow.addView(pd, new LinearLayout.LayoutParams(np));
-        box.addView(dateRow, full(4));
+        dateRow.addView(py, weight(1.3f));
+        dateRow.addView(pm, weight(1));
+        dateRow.addView(pd, weight(1));
+        box.addView(dateRow, full(8));
 
-        // 태어난 시간
-        CheckBox noTime = new CheckBox(this);
-        noTime.setText("태어난 시간을 몰라요");
-        box.addView(noTime, full(10));
-
-        LinearLayout timeRow = new LinearLayout(this);
-        timeRow.setOrientation(LinearLayout.HORIZONTAL);
+        final boolean[] noTime = {had && !prefs.getBoolean(ProfileStore.K_TIME_KNOWN, false)};
+        LinearLayout timeRow = row();
         timeRow.setGravity(Gravity.CENTER);
         NumberPicker ph = new NumberPicker(this);
         ph.setMinValue(0);
@@ -581,49 +805,41 @@ public class MainActivity extends Activity {
         ph.setDisplayedValues(hours);
         ph.setValue(had ? prefs.getInt(ProfileStore.K_HOUR, 7) : 7);
         ph.setDescendantFocusability(NumberPicker.FOCUS_BLOCK_DESCENDANTS);
-        NumberPicker pmin = new NumberPicker(this);
-        pmin.setMinValue(0);
-        pmin.setMaxValue(59);
-        String[] mins = new String[60];
-        for (int m = 0; m < 60; m++) mins[m] = String.format(Locale.KOREAN, "%02d분", m);
-        pmin.setDisplayedValues(mins);
-        pmin.setValue(had ? prefs.getInt(ProfileStore.K_MIN, 0) : 0);
-        pmin.setDescendantFocusability(NumberPicker.FOCUS_BLOCK_DESCENDANTS);
-        timeRow.addView(ph, new LinearLayout.LayoutParams(np));
-        timeRow.addView(pmin, new LinearLayout.LayoutParams(np));
-        box.addView(timeRow);
+        stylePicker(ph);
+        NumberPicker pmin = picker(0, 59, had ? prefs.getInt(ProfileStore.K_MIN, 0) : 0, "분");
+        timeRow.addView(ph, weight(1.3f));
+        timeRow.addView(pmin, weight(1));
 
-        boolean unknown = had && !prefs.getBoolean(ProfileStore.K_TIME_KNOWN, false);
-        noTime.setChecked(unknown);
-        timeRow.setAlpha(unknown ? 0.3f : 1f);
-        ph.setEnabled(!unknown);
-        pmin.setEnabled(!unknown);
-        noTime.setOnCheckedChangeListener((b, c) -> {
-            timeRow.setAlpha(c ? 0.3f : 1f);
-            ph.setEnabled(!c);
-            pmin.setEnabled(!c);
-        });
+        Runnable applyTime = () -> {
+            timeRow.setAlpha(noTime[0] ? 0.25f : 1f);
+            ph.setEnabled(!noTime[0]);
+            pmin.setEnabled(!noTime[0]);
+        };
+        box.addView(divider(8));
+        box.addView(switchRow("태어난 시간을 몰라요", "모르면 날짜만으로 봐요", noTime[0], (b, c) -> {
+            noTime[0] = c;
+            applyTime.run();
+        }), full(12));
+        box.addView(timeRow, full(4));
+        applyTime.run();
 
-        TextView hint = new TextView(this);
-        hint.setText("시간을 모르면 날짜만으로 봐요.\n밤 11시 30분 이후에 태어났으면 다음 날로 계산해요(전통 방식).");
-        hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        hint.setLineSpacing(0, 1.3f);
-        box.addView(hint, full(6));
+        TextView hint = tv("밤 11시 30분 이후 출생은 다음 날로 계산해요(전통 방식).", 12, ink3, fReg);
+        box.addView(hint, wrap(8));
 
-        ScrollView sv = new ScrollView(this);
-        sv.addView(box);
+        LinearLayout btns = row();
+        TextView cancel = button("취소", false);
+        TextView save = button("저장", true);
+        btns.addView(cancel, weight(1));
+        LinearLayout.LayoutParams sl = weight(1);
+        sl.leftMargin = dp(10);
+        btns.addView(save, sl);
+        box.addView(btns, full(22));
 
-        AlertDialog dlg = new AlertDialog.Builder(this)
-                .setTitle("생년월일 넣기")
-                .setView(sv)
-                .setPositiveButton("저장", null)
-                .setNegativeButton("취소", null)
-                .create();
-        dlg.setOnShowListener(d -> dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            boolean lu = cal.getCheckedRadioButtonId() == lunar.getId();
-            String err = ProfileStore.save(prefs, lu, lu && leap.isChecked(),
+        cancel.setOnClickListener(v -> dlg.dismiss());
+        save.setOnClickListener(v -> {
+            String err = ProfileStore.save(prefs, lunar[0], lunar[0] && leap[0],
                     py.getValue(), pm.getValue(), pd.getValue(),
-                    !noTime.isChecked(), ph.getValue(), pmin.getValue());
+                    !noTime[0], ph.getValue(), pmin.getValue());
             if (err != null) {
                 Toast.makeText(this, err, Toast.LENGTH_LONG).show();
                 return;
@@ -631,12 +847,29 @@ public class MainActivity extends Activity {
             weekly = false;
             renderFortune();
             dlg.dismiss();
-            Toast.makeText(this, "저장했어요. 오늘의 운세를 확인해 보세요", Toast.LENGTH_SHORT).show();
-        }));
+            Toast.makeText(this, "저장했어요", Toast.LENGTH_SHORT).show();
+        });
+
+        ScrollView sv = new ScrollView(this);
+        sv.addView(box);
+        FrameLayout frame = new FrameLayout(this);
+        frame.setPadding(dp(12), dp(12), dp(12), dp(12));
+        frame.addView(sv);
+        dlg.setContentView(frame);
+
+        Window w = dlg.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            w.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT);
+            w.setGravity(Gravity.BOTTOM);
+        }
         dlg.show();
     }
 
-    // ---------- 알람 ----------
+    // =====================================================================
+    // 알람
+    // =====================================================================
+
     private void pickTime() {
         int h = prefs.getInt(AlarmScheduler.K_HOUR, 7);
         int m = prefs.getInt(AlarmScheduler.K_MIN, 0);
@@ -651,21 +884,21 @@ public class MainActivity extends Activity {
     private void updateTime() {
         int h = prefs.getInt(AlarmScheduler.K_HOUR, 7);
         int m = prefs.getInt(AlarmScheduler.K_MIN, 0);
-        String ampm = h < 12 ? "오전" : "오후";
         int h12 = h % 12 == 0 ? 12 : h % 12;
-        timeView.setText(String.format(Locale.KOREAN, "%s %d:%02d", ampm, h12, m));
+        timeView.setText(String.format(Locale.KOREAN, "%d:%02d", h12, m));
+        ampmView.setText(h < 12 ? "오전" : "오후");
     }
 
     private void updateStatus() {
         if (statusView == null) return;
         if (!prefs.getBoolean(AlarmScheduler.K_ON, false)) {
-            statusView.setText("알람이 꺼져 있어요");
+            statusView.setText("알림이 꺼져 있어요");
             return;
         }
         long at = AlarmScheduler.nextTrigger(this);
-        String s = new SimpleDateFormat("M월 d일(E) a h:mm", Locale.KOREAN).format(new Date(at));
-        String warn = hasNotificationPermission() ? "" : "\n⚠ 알림 권한이 꺼져 있어 알림이 오지 않아요";
-        statusView.setText("다음 알림: " + s + warn);
+        String s = new SimpleDateFormat("M월 d일 (E) a h:mm", Locale.KOREAN).format(new Date(at));
+        String warn = hasNotificationPermission() ? "" : "\n알림 권한이 꺼져 있어 알림이 오지 않아요";
+        statusView.setText("다음 알림  " + s + warn);
     }
 
     private boolean hasNotificationPermission() {
